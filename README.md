@@ -1,3 +1,65 @@
+ # Stabilized Conditional Diffusion Covariance GMV
+
+This repository implements the research pipeline described in the project:
+"Stabilized Conditional Diffusion Forecasting of Next-Month Covariance Distributions
+for Global Minimum-Variance Portfolio Optimization".
+
+Quick start
+-----------
+
+1. Create a Python environment and install requirements:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. Data
+- Place a cleaned CRSP extract at `data/raw/crsp_daily.parquet` (see `scripts/01_clean_crsp_data.py`).
+
+3. Run the pipeline (examples):
+
+```bash
+# Clean and prepare data
+python scripts/01_clean_crsp_data.py
+# Build universes and group samples
+python scripts/02_build_universe_and_groups.py
+# Build covariance datasets (train/val/test)
+python scripts/03_build_covariance_datasets.py
+# Train diffusion models
+python scripts/04_train_diffusion_models.py
+# Validate hyperparameters
+python scripts/05_validate_hyperparameters.py
+# Run final test (selected model)
+python scripts/06_run_final_test.py
+# (Optional) Bayesian operational test
+python scripts/08_run_bayesian_test.py
+```
+
+Notes
+-----
+- The primary research method used in this repo is a conditional diffusion model
+  that generates plausible next-month covariance matrices; these are averaged in
+  covariance space and blended with the historical sample covariance using an
+  `alpha` weight before solving a long-only GMV per sleeve.
+- `scripts/08_run_bayesian_test.py` contains an additional Bayesian IW comparison
+  implemented as an operational estimator (uses historical returns available at
+  the rebalance date).
+
+Results and artifacts
+---------------------
+- Trained models and scalers: `artifacts/`
+- Processed datasets: `data/processed/`
+- Backtest outputs and figures: `results/`
+
+License & Contributing
+----------------------
+This repo is a work-in-progress. If you want me to add a license or README
+sections for contributors, tell me which license you prefer.
+
+---
+Generated snapshot and cleaned by the development helper.
 # Stabilized Conditional Diffusion Forecasting of Next-Month Covariance Distributions for Global Minimum-Variance Portfolio Optimization
 
 ## Overview
