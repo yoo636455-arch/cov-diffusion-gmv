@@ -29,9 +29,10 @@ from src.datasets import (
     apply_scalers,
     build_covariance_dataset,
     build_daily_sliding_covariance_dataset,
+    load_dataset,
     save_dataset,
 )
-from src.transforms import fit_training_scalers
+from src.transforms import fit_training_scalers, load_scalers
 from src.utils import get_logger
 
 logger = get_logger("03_build_covariance_datasets", logging.INFO)
@@ -58,6 +59,8 @@ def main() -> None:
     logger.info("Loading cleaned CRSP and rebalance/group data …")
     crsp_df = pd.read_parquet(interim_dir / "cleaned_crsp_daily.parquet")
     crsp_df["date"] = pd.to_datetime(crsp_df["date"])
+    # Pre-index on (date, permno) for O(log n) sleeve lookups
+    crsp_df = crsp_df.set_index(["date", "permno"]).sort_index()
 
     cal_df = pd.read_parquet(interim_dir / "trading_calendar.parquet")
     trading_dates = pd.DatetimeIndex(pd.to_datetime(cal_df["date"]).sort_values())
@@ -79,40 +82,43 @@ def main() -> None:
     )
 
     # ---- Training dataset (daily-sliding window) -------------------------
-    stride = cfg["covariance_transform"].get("training_window_stride_days", 1)
-    train_end = pd.Timestamp(cfg["periods"]["train"]["end"])
+    train_npz = processed_dir / "covariance_pairs_train.npz"
+    cond_scaler_path = scaler_dir / "conditioning_scaler.pkl"
+    tgt_scaler_path  = scaler_dir / "target_scaler.pkl"
 
-    logger.info(
-        "Building TRAINING covariance pairs with daily stride=%d "
-        "(train_end=%s) …", stride, train_end.date()
-    )
-    train_ds = build_daily_sliding_covariance_dataset(
-        crsp_df=crsp_df,
-        trading_dates=trading_dates,
-        groups_df=train_groups,
-        train_end_date=train_end,
-        lookback_days=lkb,
-        horizon_days=hor,
-        ridge_epsilon=ridge_eps,
-        stride=stride,
-    )
-    logger.info(
-        "Training: %d pairs, cond_vech shape %s",
-        len(train_ds["condition_vech"]), train_ds["condition_vech"].shape,
-    )
-
-    # ---- Fit scalers on training data ONLY --------------------------------
-    logger.info("Fitting scalers on training data only …")
-    cond_scaler, tgt_scaler = fit_training_scalers(
-        train_condition_vectors=train_ds["condition_vech"],
-        train_target_vectors=train_ds["target_vech"],
-        save_dir=scaler_dir,
-    )
-
-    # Apply scalers to training data
-    train_ds = apply_scalers(train_ds, cond_scaler, tgt_scaler)
-    save_dataset(train_ds, processed_dir / "covariance_pairs_train.npz")
-    logger.info("Saved training dataset.")
+    if train_npz.exists() and cond_scaler_path.exists() and tgt_scaler_path.exists():
+        logger.info("Training dataset already exists — loading scalers and skipping rebuild.")
+        cond_scaler, tgt_scaler = load_scalers(scaler_dir)
+    else:
+        stride = cfg["covariance_transform"].get("training_window_stride_days", 1)
+        train_end = pd.Timestamp(cfg["periods"]["train"]["end"])
+        logger.info(
+            "Building TRAINING covariance pairs with daily stride=%d "
+            "(train_end=%s) …", stride, train_end.date()
+        )
+        train_ds = build_daily_sliding_covariance_dataset(
+            crsp_df=crsp_df,
+            trading_dates=trading_dates,
+            groups_df=train_groups,
+            train_end_date=train_end,
+            lookback_days=lkb,
+            horizon_days=hor,
+            ridge_epsilon=ridge_eps,
+            stride=stride,
+        )
+        logger.info(
+            "Training: %d pairs, cond_vech shape %s",
+            len(train_ds["condition_vech"]), train_ds["condition_vech"].shape,
+        )
+        logger.info("Fitting scalers on training data only …")
+        cond_scaler, tgt_scaler = fit_training_scalers(
+            train_condition_vectors=train_ds["condition_vech"],
+            train_target_vectors=train_ds["target_vech"],
+            save_dir=scaler_dir,
+        )
+        train_ds = apply_scalers(train_ds, cond_scaler, tgt_scaler)
+        save_dataset(train_ds, train_npz)
+        logger.info("Saved training dataset.")
 
     # ---- Validation dataset ----------------------------------------------
     val_sleeves = eval_sleeves[eval_sleeves["rebalance_date"].isin(val_dates)].copy()

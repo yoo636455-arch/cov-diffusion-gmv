@@ -36,32 +36,29 @@ def compute_return_matrix(
 
     Returns None if any return is missing for any permno on any date.
 
-    Parameters
-    ----------
-    crsp_df : cleaned CRSP panel
-    trading_dates : full trading calendar
-    permnos : ordered list of N PERMNOs (e.g., descending market cap)
-    rebalance_date : used only for logging
-    window_dates : the specific trading dates to use
-
-    Returns
-    -------
-    np.ndarray of shape (T, N) or None
+    Accepts either a plain DataFrame (filtered via boolean mask) or a DataFrame
+    pre-indexed on (date, permno) for fast O(log n) lookups.
     """
-    # Pivot: rows = dates, cols = permnos
-    panel = crsp_df[
-        crsp_df["date"].isin(window_dates) & crsp_df["permno"].isin(permnos)
-    ][["date", "permno", "ret_total"]].copy()
-
-    pivot = panel.pivot(index="date", columns="permno", values="ret_total")
-
-    # Reindex to ensure correct order and all dates present
-    pivot = pivot.reindex(index=window_dates, columns=permnos)
+    if isinstance(crsp_df.index, pd.MultiIndex):
+        # Fast path: pre-indexed on (date, permno)
+        try:
+            rows = crsp_df.loc[(list(window_dates), permnos), "ret_total"]
+        except KeyError:
+            return None
+        pivot = rows.unstack(level="permno")
+        pivot = pivot.reindex(index=window_dates, columns=permnos)
+    else:
+        # Slow path: full scan (kept for backward compat)
+        panel = crsp_df[
+            crsp_df["date"].isin(window_dates) & crsp_df["permno"].isin(permnos)
+        ][["date", "permno", "ret_total"]].copy()
+        pivot = panel.pivot(index="date", columns="permno", values="ret_total")
+        pivot = pivot.reindex(index=window_dates, columns=permnos)
 
     if pivot.isna().any().any():
-        missing_count = pivot.isna().sum().sum()
         logger.debug(
-            "Missing returns at %s: %d cells", rebalance_date.date(), missing_count
+            "Missing returns at %s: %d cells",
+            rebalance_date.date(), pivot.isna().sum().sum(),
         )
         return None
 
