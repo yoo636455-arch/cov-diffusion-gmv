@@ -57,6 +57,7 @@ from src.metrics import (
 from src.train import load_trained_model
 from src.transforms import covariance_to_log_vech, load_scalers
 from src.turnover import apply_transaction_costs, compute_turnover
+from src.config import get_config
 from src.utils import get_device, get_logger, set_global_seed
 
 logger = get_logger("06_run_final_test", logging.INFO)
